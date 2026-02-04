@@ -3,6 +3,7 @@ package kafka
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,9 +92,9 @@ func (c *consumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.C
 func New(cnf *config.Config) iface.Broker {
 	b := &Broker{Broker: common.NewBroker(cnf)}
 	// Create Kafka consumer group and attach it.
-	b.consumer = newConsumerGroup(cnf.Kafka)
+	b.consumer = newConsumerGroup(cnf.Kafka, cnf.TLSConfig)
 	// Create Kafka sync producer and attach it.
-	p, err := newProducer(cnf.Kafka)
+	p, err := newProducer(cnf.Kafka, cnf.TLSConfig)
 	if err != nil {
 		log.FATAL.Fatalf("error creating kafka producer: %v", err)
 	}
@@ -102,7 +103,7 @@ func New(cnf *config.Config) iface.Broker {
 }
 
 // newProducer creates a new Kafka sync produce.
-func newProducer(cnf *config.KafkaConfig) (sarama.SyncProducer, error) {
+func newProducer(cnf *config.KafkaConfig, tlsConfig *tls.Config) (sarama.SyncProducer, error) {
 	config := sarama.NewConfig()
 	config.Producer.Partitioner = sarama.NewRandomPartitioner
 	config.Producer.RequiredAcks = sarama.WaitForAll
@@ -129,11 +130,16 @@ func newProducer(cnf *config.KafkaConfig) (sarama.SyncProducer, error) {
 	if cnf.MessageSize != 0 {
 		config.Producer.MaxMessageBytes = cnf.MessageSize
 	}
+	// Enable TLS if config is provided.
+	if tlsConfig != nil {
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = tlsConfig
+	}
 	return sarama.NewSyncProducer(cnf.Addrs, config)
 }
 
 // newConsumerGroup creates a new Kafka consumer group.
-func newConsumerGroup(cnf *config.KafkaConfig) sarama.ConsumerGroup {
+func newConsumerGroup(cnf *config.KafkaConfig, tlsConfig *tls.Config) sarama.ConsumerGroup {
 	config := sarama.NewConfig()
 	// If client id is not set then set default client id.
 	if cnf.ClientID == "" {
@@ -155,6 +161,11 @@ func newConsumerGroup(cnf *config.KafkaConfig) sarama.ConsumerGroup {
 	// Set max consume size.
 	if cnf.MessageSize != 0 {
 		config.Consumer.Fetch.Max = int32(cnf.MessageSize)
+	}
+	// Enable TLS if config is provided.
+	if tlsConfig != nil {
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = tlsConfig
 	}
 	// Create a new consumer group.
 	cGroup, err := sarama.NewConsumerGroup(cnf.Addrs, cnf.Group, config)
